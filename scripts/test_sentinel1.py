@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -51,7 +52,8 @@ STAC_SEARCH_URL = "https://stac.dataspace.copernicus.eu/v1/search"
 STAC_COLLECTION = "sentinel-1-grd"
 TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
 PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
-OUTPUT_CRS_EPSG = 32645  # UTM 45N, covers Trishuli
+OUTPUT_CRS_EPSG = 32645  # default: UTM 45N, covers Trishuli
+KURO_SIWO_CRS_EPSG = 3857  # Kuro Siwo grid: Web Mercator, 10 map units, origin (0, 0)
 RESOLUTION_M = 10
 
 # Kuro Siwo GRD input statistics (configs/train/data_config.json), linear sigma0.
@@ -61,15 +63,17 @@ KURO_SIWO_CLAMP = 0.15
 EVALSCRIPT = """//VERSION=3
 function setup() {
   return {
-    input: [{bands: ["VV", "VH", "shadowMask", "dataMask"]}],
-    output: {bands: 4, sampleType: "FLOAT32"}
+    input: [{bands: ["VV", "VH", "dataMask"]}],
+    output: {bands: 3, sampleType: "FLOAT32"}
   };
 }
 function evaluatePixel(s) {
-  return [s.VV, s.VH, s.shadowMask, s.dataMask];
+  return [s.VV, s.VH, s.dataMask];
 }
 """
-BAND_NAMES = ("VV", "VH", "shadowMask", "dataMask")
+# shadowMask is not requested: Sentinel Hub only provides it with GAMMA0_TERRAIN (radiometric
+# terrain correction), and we need SIGMA0_ELLIPSOID to stay comparable with Kuro Siwo.
+BAND_NAMES = ("VV", "VH", "dataMask")
 
 
 # --------------------------------------------------------------------------- catalogue search
@@ -184,15 +188,15 @@ def get_token(client_id: str, client_secret: str) -> str:
         return json.load(resp)["access_token"]
 
 
-def build_process_request(scene: dict, bbox_utm) -> dict:
+def build_process_request(scene: dict, bbox, epsg: int = OUTPUT_CRS_EPSG) -> dict:
     """Sentinel Hub Process API request for one acquisition, orthorectified linear sigma0."""
     start = datetime.fromisoformat(scene["start_datetime"].replace("Z", "+00:00")) - timedelta(minutes=1)
     end = datetime.fromisoformat(scene["end_datetime"].replace("Z", "+00:00")) + timedelta(minutes=1)
     return {
         "input": {
             "bounds": {
-                "bbox": list(bbox_utm),
-                "properties": {"crs": f"http://www.opengis.net/def/crs/EPSG/0/{OUTPUT_CRS_EPSG}"},
+                "bbox": list(bbox),
+                "properties": {"crs": f"http://www.opengis.net/def/crs/EPSG/0/{epsg}"},
             },
             "data": [
                 {
@@ -223,11 +227,21 @@ def build_process_request(scene: dict, bbox_utm) -> dict:
     }
 
 
-def retrieve_sigma0(scene: dict, token: str) -> Path:
+def snap_bounds(bounds, step: float = RESOLUTION_M) -> tuple:
+    """Expand bounds outward to multiples of step, i.e. a grid with origin (0, 0)."""
+    w, s, e, n = bounds
+    return (math.floor(w / step) * step, math.floor(s / step) * step,
+            math.ceil(e / step) * step, math.ceil(n / step) * step)
+
+
+def retrieve_sigma0(scene: dict, token: str, epsg: int = OUTPUT_CRS_EPSG) -> Path:
     from rasterio.warp import transform_bounds
 
-    bbox_utm = transform_bounds("EPSG:4326", f"EPSG:{OUTPUT_CRS_EPSG}", *SUB_AOI_BBOX)
-    body = json.dumps(build_process_request(scene, bbox_utm)).encode()
+    bbox = transform_bounds("EPSG:4326", f"EPSG:{epsg}", *SUB_AOI_BBOX)
+    if epsg == KURO_SIWO_CRS_EPSG:
+        # Like SNAP's alignToStandardGrid in Kuro Siwo: whole 10-unit pixels on a (0, 0)-origin grid.
+        bbox = snap_bounds(bbox)
+    body = json.dumps(build_process_request(scene, bbox, epsg)).encode()
     req = urllib.request.Request(
         PROCESS_URL,
         data=body,
@@ -235,7 +249,8 @@ def retrieve_sigma0(scene: dict, token: str) -> Path:
     )
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     acq = scene["datetime"][:10].replace("-", "")
-    out = OUT_DIR / f"s1_sigma0_{acq}_relorb{scene['relative_orbit']}_subaoi.tif"
+    suffix = "" if epsg == OUTPUT_CRS_EPSG else f"_epsg{epsg}"
+    out = OUT_DIR / f"s1_sigma0_{acq}_relorb{scene['relative_orbit']}_subaoi{suffix}.tif"
     with urllib.request.urlopen(req, timeout=180) as resp:
         out.write_bytes(resp.read())
     _set_band_descriptions(out)
@@ -278,12 +293,10 @@ def raster_stats(path: Path, histogram: bool = True) -> dict:
     data_mask = bands.get("dataMask", np.ones(arr.shape[1:]))
     valid = (data_mask == 1) & np.isfinite(bands["VV"]) & np.isfinite(bands["VH"]) & (bands["VV"] > 0)
     info["nodata_pct"] = round(100 * (1 - valid.mean()), 2)
-    if "shadowMask" in bands:
-        info["shadow_pct"] = round(100 * float((bands["shadowMask"] == 1).mean()), 2)
 
     print(f"\nRaster: {info['file']}")
     print(f"  shape {info['shape']}  CRS {info['crs']}  resolution {info['resolution']} m")
-    print(f"  no-data: {info['nodata_pct']} %" + (f"   shadow: {info['shadow_pct']} %" if "shadow_pct" in info else ""))
+    print(f"  no-data: {info['nodata_pct']} %")
 
     pcts = [1, 5, 25, 50, 75, 95, 99]
     for name in ("VV", "VH"):
@@ -349,6 +362,11 @@ def _histogram(bands: dict, valid, out: Path) -> None:
 # --------------------------------------------------------------------------- main
 
 
+def _error_text(err: urllib.error.HTTPError) -> str:
+    """Server error message, truncated. Never includes request credentials."""
+    return err.read().decode(errors="replace")[:500]
+
+
 def _print_scene(label: str, s: dict) -> None:
     print(
         f"  {label:<5} {s['datetime'][:19]}  {s['platform']}  {s['orbit_state']}  relorb {s['relative_orbit']}"
@@ -361,6 +379,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--metadata-only", action="store_true", help="search only, no raster retrieval")
     ap.add_argument("--stats", type=Path, help="only compute statistics for an existing GeoTIFF")
+    ap.add_argument(
+        "--epsg", type=int, default=OUTPUT_CRS_EPSG, choices=[OUTPUT_CRS_EPSG, KURO_SIWO_CRS_EPSG],
+        help=f"output CRS: {OUTPUT_CRS_EPSG} (UTM 45N, default) or {KURO_SIWO_CRS_EPSG} (Kuro Siwo grid)",
+    )
     args = ap.parse_args()
 
     if args.stats:
@@ -415,12 +437,19 @@ def main() -> int:
         )
         return 2
 
-    print(f"\nRequesting sub-AOI {SUB_AOI_BBOX} of post-event scene via Sentinel Hub Process API ...")
+    print(f"\nRequesting sub-AOI {SUB_AOI_BBOX} of post-event scene (EPSG:{args.epsg}) via Sentinel Hub Process API ...")
     try:
-        path = retrieve_sigma0(sel["post"], get_token(client_id, client_secret))
+        token = get_token(client_id, client_secret)
     except urllib.error.HTTPError as err:
-        print(f"  request failed: HTTP {err.code}: {err.read().decode(errors='replace')[:500]}")
+        print(f"  authentication failed (CDSE token endpoint): HTTP {err.code}: {_error_text(err)}")
+        print("  Check SH_CLIENT_ID / SH_CLIENT_SECRET in .env and the OAuth client in the CDSE dashboard.")
         return 3
+    print("  authentication OK (token obtained)")
+    try:
+        path = retrieve_sigma0(sel["post"], token, args.epsg)
+    except urllib.error.HTTPError as err:
+        print(f"  Process API request failed: HTTP {err.code}: {_error_text(err)}")
+        return 4
     print(f"  saved {_rel(path)}")
     raster_stats(path)
     return 0

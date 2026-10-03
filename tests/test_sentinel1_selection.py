@@ -68,7 +68,7 @@ def test_bbox_coverage_full_and_partial():
 
 
 def test_raster_stats_on_synthetic_geotiff(tmp_path):
-    """Exercises the statistics routine on a clearly synthetic 4-band raster (not real data)."""
+    """Exercises the statistics routine on a clearly synthetic 3-band raster (not real data)."""
     import numpy as np
     import rasterio
     from rasterio.transform import from_origin
@@ -76,24 +76,25 @@ def test_raster_stats_on_synthetic_geotiff(tmp_path):
     rng = np.random.default_rng(0)
     vv = rng.uniform(0.01, 0.2, (20, 20)).astype("float32")
     vh = (vv / 4).astype("float32")
-    shadow = np.zeros((20, 20), "float32")
-    shadow[0, :] = 1
     data_mask = np.ones((20, 20), "float32")
     data_mask[:, :2] = 0  # 10 % no-data
     path = tmp_path / "synthetic.tif"
     with rasterio.open(
-        path, "w", driver="GTiff", width=20, height=20, count=4, dtype="float32",
+        path, "w", driver="GTiff", width=20, height=20, count=3, dtype="float32",
         crs="EPSG:32645", transform=from_origin(300000, 3100000, 10, 10),
     ) as ds:
-        ds.write(np.stack([vv, vh, shadow, data_mask]))
+        ds.write(np.stack([vv, vh, data_mask]))
         for i, name in enumerate(s1.BAND_NAMES, start=1):
             ds.set_band_description(i, name)
 
     info = s1.raster_stats(path, histogram=False)
-    assert info["shape"] == [4, 20, 20]
+    assert info["shape"] == [3, 20, 20]
     assert info["resolution"] == [10.0, 10.0]
     assert info["nodata_pct"] == 10.0
-    assert info["shadow_pct"] == 5.0
     expected = vv[:, 2:]
     assert abs(info["VV"]["mean"] - float(expected.mean())) < 1e-6
     assert 0 < info["VV"]["pct_above_kuro_clamp"] < 100
+
+
+def test_snap_bounds_expands_to_10_unit_grid():
+    assert s1.snap_bounds((9481231.4, 3242001.0, 9486799.9, 3247050.0)) == (9481230, 3242000, 9486800, 3247050)
