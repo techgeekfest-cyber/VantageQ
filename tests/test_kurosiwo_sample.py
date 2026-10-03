@@ -129,3 +129,35 @@ def test_num_classes_excludes_ignore_index_and_ignored_pixels_do_not_affect_loss
     # Loss with ignored pixels equals the loss over only the remaining pixels.
     expected = torch.nn.functional.cross_entropy(logits[..., 1:, :], y[..., 1:, :])
     assert torch.isclose(loss_fn(logits, y_ignored), expected)
+
+
+def test_confusion_excludes_ignore_index_pixels():
+    from ml.metrics import confusion
+
+    target = np.array([0, 1, 2, 2, 3, 3])
+    pred = np.array([0, 2, 2, 0, 2, 1])  # predictions on label-3 pixels must not count
+    cm, ignored = confusion(pred, target)
+    assert ignored == 2 and cm.sum() == 4
+    assert cm.tolist() == [[1, 0, 0], [0, 0, 1], [1, 0, 1]]
+
+
+def test_summarize_flood_and_water_metrics():
+    from ml.metrics import confusion, summarize
+
+    target = np.array([0, 0, 0, 1, 2, 2, 2, 2, 3])
+    pred = np.array([0, 2, 0, 1, 2, 2, 0, 1, 0])
+    m = summarize(*confusion(pred, target))
+    f = m["flood"]  # flood: tp 2, fp 1 (gt 0 -> 2), fn 2 (gt 2 -> 0 and 2 -> 1)
+    assert (f["tp"], f["fp"], f["fn"]) == (2, 1, 2)
+    assert np.isclose(f["iou"], 2 / 5) and np.isclose(f["precision"], 2 / 3) and np.isclose(f["recall"], 2 / 4)
+    assert np.isclose(f["f1"], 2 * 2 / (2 * 2 + 1 + 2))
+    w = m["water_binary"]  # water = {1, 2}: tp 4, fp 1, fn 1
+    assert (w["tp"], w["fp"], w["fn"]) == (4, 1, 1)
+    assert m["valid_pixels"] == 8 and m["ignored_pixels"] == 1
+
+
+def test_absent_class_gives_nan_not_zero():
+    from ml.metrics import confusion, summarize
+
+    m = summarize(*confusion(np.array([0, 0]), np.array([0, 0])))
+    assert np.isnan(m["flood"]["iou"]) and np.isnan(m["flood"]["recall"])

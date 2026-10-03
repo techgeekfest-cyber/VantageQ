@@ -9,7 +9,9 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +19,7 @@ import numpy as np
 HF_REPO = "orion-ai-lab/Kuro-Siwo-Webdataset"
 HF_RESOLVE = f"https://huggingface.co/datasets/{HF_REPO}/resolve/main/"
 TRAIN_SHARDS = tuple(f"train_GRD/shard-{i:05d}.tar" for i in range(5))
+TEST_SHARDS = tuple(f"test_GRD/shard-{i:05d}.tar" for i in range(12))  # HF folder, not the official split
 SAMPLE_BYTES = 1.82e6  # approximate size of one labelled GRD sample in the tar stream
 
 # Official splits by event (activation) ID, configs/train/data_config.json. The Hugging Face
@@ -76,12 +79,14 @@ class _Http:
             self.url = resp.geturl()  # signed CDN URL, valid for the session
             self.size = int(resp.headers["Content-Range"].split("/")[1])
         self.bytes = 0
+        self._lock = threading.Lock()
 
     def get(self, start: int, length: int) -> bytes:
         req = urllib.request.Request(self.url, headers={"Range": f"bytes={start}-{start + length - 1}"})
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = resp.read()
-        self.bytes += len(data)
+        with self._lock:
+            self.bytes += len(data)
         return data
 
 
@@ -118,15 +123,16 @@ def _probe(http: _Http, offset: int, max_hops: int = 14) -> dict | None:
     return None
 
 
-def probe_shard(shard: str, step_bytes: float = 1e9) -> tuple[list[dict], int]:
-    """Probe a shard every `step_bytes`; return (probes, bytes fetched). Only headers + info.json."""
+def probe_shard(shard: str, step_bytes: float = 1e9, workers: int = 1) -> tuple[list[dict], int]:
+    """Probe a shard every `step_bytes`; return (probes in offset order, bytes fetched).
+
+    Only tar headers and info.json are read. `workers` > 1 runs probes in parallel threads.
+    """
     http = _Http(shard)
-    probes = []
-    for off in range(0, http.size, int(step_bytes)):
-        p = _probe(http, off)
-        if p:
-            probes.append({"shard": shard, **p})
-    return probes, http.bytes
+    offsets = range(0, http.size, int(step_bytes))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(lambda off: _probe(http, off), offsets))
+    return [{"shard": shard, **p} for p in results if p], http.bytes
 
 
 # --------------------------------------------------------------------------- streaming
