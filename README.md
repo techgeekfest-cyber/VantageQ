@@ -4,20 +4,25 @@ Satellite flood-impact intelligence prototype for the **IIT Mandi Multimodal AI 
 Track B — Mapping Flood Damage from Space**.
 
 > **Status:** working research prototype. Sentinel-1 retrieval, a frozen flood-segmentation model,
-> Trishuli inference, pre-event OSM impact and connectivity analysis, and a static map dashboard are
-> implemented. The situation report and EMSR927 evaluation are not built yet. See
-> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> Trishuli inference, pre-event OSM impact and connectivity analysis, a static map dashboard and a
+> one-page situation report are implemented. The EMSR927 comparison (evaluation-only) is not built
+> yet. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## What it will do
+## What it does
 
-Given an area of interest (AOI) and a flood event date, VantageQ will:
+Given an area of interest (AOI) and a flood event date, the current prototype:
 
-1. Map flood extent (Sentinel-1 SAR flood segmentation) and potential change/debris areas
-2. Estimate potentially affected buildings, roads and bridges using pre-event OpenStreetMap
-3. Identify settlements potentially cut off from the nearest town or hospital
-4. Show results on an interactive map dashboard
-5. Generate a one-page situation report
-6. Provide reproducible evaluation results
+1. Finds same-track Sentinel-1 GRD scenes before and after the event (Copernicus Data Space) and
+   predicts flood extent with a U-Net trained on the Kuro Siwo dataset
+2. Identifies potentially affected roads, bridges and buildings by overlap with the predicted flood,
+   using a historical (pre-event) OpenStreetMap snapshot
+3. Flags settlements potentially cut off from the main road network in a simplified road graph
+4. Shows the results on an interactive map dashboard
+5. Generates a one-page situation report from the same structured outputs
+6. Records reproducible model evaluation on held-out Kuro Siwo events (`docs/TEST_EVALUATION.md`)
+
+Not yet built: before/after change (debris) mapping as a product layer, routing to specific
+towns/hospitals, and the evaluation-only EMSR927 comparison.
 
 ## Data rules
 
@@ -26,19 +31,19 @@ OpenStreetMap**. Training uses listed datasets (Kuro Siwo; optionally Sen1Floods
 
 Copernicus EMS products (including **EMSR927**), UNOSAT and other published damage maps, and
 post-event OSM edits are **never** production inputs. EMSR927 is used only in the separate
-`evaluation/` workflow, after the system has produced its own output.
+`evaluation/` workflow (not yet built), after the system has produced its own output.
 
 ## Repository layout
 
 ```
 backend/      Python analysis pipeline (Sentinel-1 retrieval, impact, connectivity)
 ml/           Flood segmentation: datasets, model, training, model evaluation
-evaluation/   Evaluation-only comparison against EMSR927 (isolated)
+evaluation/   Reserved for the evaluation-only EMSR927 comparison (isolated; not yet built)
 frontend/     Next.js + TypeScript + MapLibre dashboard
 scripts/      CLI entry points
 data/         Local data (git-ignored); data/eval_only/ is quarantined
-docs/         Architecture and project documentation
-tests/        Tests, including data-boundary guard tests
+docs/         Architecture, data sources, experiment records; docs/output/ = situation report
+tests/        pytest suite (frontend tests live in frontend/src)
 ```
 
 ## Current Demo
@@ -79,14 +84,27 @@ Then open <http://localhost:3000>.
 
 More: `frontend/README.md`.
 
+## Situation Report
+
+One-page PDF (A4): [`docs/output/VantageQ_Trishuli_Situation_Report.pdf`](docs/output/VantageQ_Trishuli_Situation_Report.pdf)
+(HTML version alongside). It is generated deterministically from the same structured outputs as the
+dashboard; every number is read from the analysis JSON:
+
+```bash
+.venv/bin/python scripts/generate_situation_report.py
+```
+
+Regeneration needs the (git-ignored) pipeline outputs in `data/processed/trishuli/`; the committed
+PDF can be read without them.
+
 ## Limitations (summary)
 
 This is an educational, non-operational prototype. Results are limited by Sentinel revisit
 frequency, cloud cover for optical imagery, SAR ambiguities (terrain, vegetation, urban areas),
 OSM completeness and accuracy, and uncertainty in damage estimation. Spatial overlap with flood
 extent does **not** confirm structural damage; outputs are reported as *potentially affected*.
-Connectivity analysis depends on OSM road data and simple blocking rules. A full limitations
-section will accompany the situation report.
+Connectivity analysis depends on OSM road data and simple blocking rules. Limitations are listed
+in the situation report, on the dashboard and in `docs/TRISHULI_IMPACT_ANALYSIS.md`.
 
 ## Responsible use
 
