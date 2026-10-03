@@ -110,22 +110,30 @@ Each step writes files into one **run directory** (`data/processed/runs/<run_id>
 1. **Request** — AOI (GeoJSON polygon, EPSG:4326) + event date.
 2. **Scene selection** (`satellite`)
    - Find Sentinel-1 GRD IW (VV+VH) scenes over the AOI before and after the event.
-   - Pick one post-event scene and a pre-event scene **from the same relative orbit and
-     direction**, so before/after pixels share viewing geometry.
-   - If no same-track pair exists, stop with a clear message. (No automatic fallback modes.)
-   - Catalogue: Copernicus Data Space Ecosystem or Microsoft Planetary Computer. **[VERIFY]** which
-     is simplest, and whether an analysis-ready (terrain-corrected) S1 product is available, which
-     would avoid running our own SAR processing chain.
+   - Search with the **CDSE STAC API** (`sentinel-1-grd`; public, no auth), which exposes
+     `sat:relative_orbit` and `sat:orbit_state`.
+   - Per track (same relative orbit **and** direction), keep scenes covering the AOI; take the
+     **first post-event scene and the two latest pre-event scenes** (Kuro Siwo's 3-image format).
+     Use the track whose post-event scene is closest to the event.
+   - If no same-track triplet exists, stop with a clear message. (No automatic fallback modes.)
    - Sentinel-2: optional, for visual context only if a cloud-free scene happens to exist.
-3. **Preprocessing** (`preprocessing`) — calibrated backscatter in dB, terrain-corrected, both
-   dates on one grid, cut into tiles. Should match Kuro Siwo's preprocessing as closely as
-   practical **[VERIFY]**. Terrain correction may need Copernicus DEM; otherwise DEM stays optional.
-4. **Flood segmentation** (`inference`) — U-Net on before + after VV/VH tiles → flood mask and
-   flood probability. Tiles stitched back together.
+   - See `docs/DATA_SOURCES.md` §2–3.
+3. **Preprocessing** (`preprocessing`) — fetch AOI-clipped, orthorectified **linear σ⁰** VV/VH at
+   10 m from the **Sentinel Hub Process API on CDSE** (`SIGMA0_ELLIPSOID`, `COPERNICUS_30` DEM,
+   Lee speckle filter), plus its `shadowMask`/`dataMask`. This approximates Kuro Siwo's SNAP chain
+   (σ⁰ linear, Lee Sigma, SRTM terrain correction). Then clamp to [0, 0.15], normalise with Kuro
+   Siwo's mean/std, and tile at 224 px. **Required check:** our σ⁰ histograms must roughly match
+   Kuro Siwo's statistics; if not, run Kuro Siwo's own SNAP graph instead. No separate DEM download
+   is needed for this step.
+4. **Flood segmentation** (`inference`) — U-Net on pre1 + pre2 + post VV/VH tiles → classes
+   no-water / permanent water / flood, plus flood probability. Tiles stitched back together;
+   shadow/no-data pixels marked as no-data, not dry.
 5. **Change map** (`change`) — log-ratio of after vs before backscatter, simple threshold.
    Labelled "potential change", lower confidence than the flood mask.
 6. **Pre-event OSM** (`osm`) — buildings, roads, bridges, settlements, hospitals as of a date
-   **before** the event (e.g. Overpass `[date:...]` query). The snapshot date is recorded.
+   **before** the event, via the **ohsome API** `time` parameter (Overpass `[date:...]` as
+   alternative). The snapshot date is recorded. Roads are fetched for an area larger than the AOI
+   so routes can reach real towns/hospitals.
 7. **Infrastructure impact** (`damage`) — GeoPandas/Shapely intersections:
    - Building intersects flood/change area → potentially affected
    - Road segment overlaps flood/change area → potentially affected (with overlapping length)
@@ -165,17 +173,25 @@ Kept simple:
 ## 5. Flood segmentation (AI component)
 
 - **Model:** standard U-Net with a pretrained ResNet encoder (`segmentation_models_pytorch`).
-- **Input:** before VV, VH + after VV, VH (dB, normalised).
-- **Output:** flood / not-flood (or Kuro Siwo's classes if simpler to keep) **[VERIFY]** labels.
-- **Loss:** cross-entropy + Dice.
+- **Input:** 6 channels: pre1 VV/VH, pre2 VV/VH, post VV/VH. **Linear σ⁰**, clamped to
+  [0, 0.15], normalised with Kuro Siwo's mean/std. 224 × 224 tiles. DEM channel off (as in the
+  official baseline).
+- **Output:** Kuro Siwo's 3 classes (0 no water, 1 permanent water, 2 flood). The flood map uses
+  class 2; permanent water is shown separately.
+- **Loss:** cross-entropy (official default); add Dice only if flood recall is poor.
 - **Reference baseline:** a threshold on the after-image / log-ratio. The U-Net must beat it.
-- **Data:** a manageable Kuro Siwo subset chosen after inspecting metadata (structure, format,
-  labels, size, licence, official splits). Sen1Floods11 is optional. No bulk download until we know
-  exactly what we need.
-- **Splits:** official splits where they exist, plus a hold-out of whole events/regions —
-  never a random tile split. Any mountain/Himalayan events are kept as an unseen test set.
-- **Metrics:** IoU, Dice/F1, precision, recall, flood-area error. Saved as JSON; README tables are
-  copied from those files.
+- **Starting point:** ResNet-18 encoder, Adam lr 1e-3, cosine schedule — Kuro Siwo's official
+  U-Net config, so our numbers are comparable with the paper.
+- **Data:** Kuro Siwo GRD webdataset, **streamed** from Hugging Face and filtered by event — one or
+  two `train_GRD` shards plus one `test_GRD` shard (tens of GB at most, not the ~1–2 TB full
+  release). Sen1Floods11 is not needed initially. See `docs/DATA_SOURCES.md` §1.
+- **Splits:** Kuro Siwo's official **event-held-out** train/val/test activations. Never a random
+  tile split.
+- **Himalayan generalisation:** Kuro Siwo contains **no Himalayan/steep-terrain events**. We report
+  the official test events, event `1111007` (Nepal lowlands) separately, and the final Trishuli
+  comparison against EMSR927 (evaluation-only). Steep-terrain performance is unknown until then.
+- **Metrics:** per-class F1, mIoU and binary-water F1 (Kuro Siwo protocol), plus flood-class IoU,
+  precision, recall and flood-area error. Saved as JSON; README tables are copied from those files.
 
 ---
 
@@ -234,7 +250,9 @@ to generate report content.
 | Vectors | GeoPandas, Shapely, PyProj |
 | Graph | NetworkX |
 | ML | PyTorch, segmentation_models_pytorch |
-| S1 processing | **[VERIFY]** analysis-ready product if available; otherwise a minimal processing chain |
+| S1 search | CDSE STAC API (`sentinel-1-grd`) |
+| S1 processing | Sentinel Hub Process API on CDSE (orthorectified σ⁰); SNAP + Kuro Siwo graph only if the radiometric check fails |
+| OSM history | ohsome API (Overpass attic as alternative) |
 | Report | Jinja2 → HTML (→ PDF) |
 | Frontend | Next.js, TypeScript, MapLibre GL JS |
 | Storage | Files on disk. No database. |
@@ -248,8 +266,9 @@ A library is added only when the module that uses it is implemented.
 
 - The hackathon brief gives the target event, AOI and date (Indian Himalaya).
 - A same-track Sentinel-1 before/after pair exists for the AOI.
-- Kuro Siwo labels fit a flood / not-flood formulation.
-- Pre-event OSM can be fetched for a specific past date.
+- Kuro Siwo labels (no water / permanent water / flood) are used as-is.
+- Pre-event OSM comes from ohsome; its current snapshot (2026-07-27) is pre-event for Trishuli.
+- A free CDSE account with Sentinel Hub access has enough quota for a few AOI requests.
 - One Colab/Kaggle-class GPU is enough for training.
 - One AOI is processed at a time.
 
@@ -261,11 +280,11 @@ A library is added only when the module that uses it is implemented.
 |------|---------------------|
 | Our S1 preprocessing differs from Kuro Siwo's → poor transfer | Match their chain; compare value histograms |
 | Steep terrain (layover/shadow, narrow valleys) | Mask unreliable pixels; state in limitations |
-| Flood recedes before the next S1 pass | Show acquisition dates; state in limitations |
+| Flood recedes before the next S1 pass | Pick the closest post-event track (+2 days for Trishuli); show acquisition dates |
 | No same-track pair in the time window | Check early (first task); choose window accordingly |
 | SAR ambiguities (wet soil, vegetation, urban areas) | Before/after input; state in limitations |
 | Kuro Siwo size / licence / access | Inspect metadata first; train on a subset |
-| Few Himalayan scenes in training data | Hold out any mountain events; report honestly |
+| No Himalayan scenes in Kuro Siwo | Report official test + Nepal-lowland event; state clearly; EMSR927 is the only mountain check |
 | Incomplete rural OSM | Report as limitation; `not_connected_before` status |
 | Overlap ≠ damage | "Potentially affected" wording everywhere |
 | Time budget | Strict priority order (§1.1); bonus last |
