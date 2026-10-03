@@ -3,3 +3,5 @@ numpy
 rasterio
 matplotlib
 pytest
+torch
+segmentation-models-pytorch

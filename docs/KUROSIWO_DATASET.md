@@ -14,9 +14,11 @@ normalisation details: `docs/KUROSIWO_PREPROCESSING.md`. No bulk download; 3 sam
 | HF `Kuro-Siwo-GeoTIFFs/GRD/*.tar` (35 tars, 12–20 GB each, 699 GB) | GeoTIFF directories | **mixed** (5 of the first 27 folders had no label/DEM) | Layout differs slightly from the Dropbox one (see §2) |
 | HF `Kuro-Siwo-Webdataset/train_GRD`, `test_GRD` (5 + 12 shards, 3–11 GB each) | WebDataset `.tar` of `.npy` + `info.json` | **Yes** | No (the official repo has no webdataset loader) |
 
-**Chosen source for VantageQ: the HF labelled webdataset.** Every sample is labelled and the train
-and test splits are pre-separated. Samples are stored sequentially, so the first N can be streamed
-without downloading the shard.
+**Chosen source for VantageQ: the HF labelled webdataset.** Every sample is labelled. Samples are
+stored sequentially, so the first N can be streamed without downloading the shard. Its
+`train_GRD` / `test_GRD` folders do **not** follow the official event split (e.g. `train_GRD`
+contains val event 1111003 and test events 1111007, 1111013), so samples must be filtered by
+`info.json` `actid` (see `docs/TRAINING_SMOKE_TEST.md`).
 
 ## 2. Official loader format (GeoTIFF directories)
 
@@ -54,7 +56,7 @@ Tar members `<key>.<field>`, e.g. `000000.flood_vv.npy`:
 | `sec1_vv`, `sec1_vh` | SL1 pre-event 1 | (1, 224, 224) float32 |
 | `sec2_vv`, `sec2_vh` | SL2 pre-event 2 | (1, 224, 224) float32 |
 | `dem` | MK0_DEM | (1, 224, 224) float32, metres |
-| `mask` | MK0_MLU | (1, 224, 224) float32, values {0, 1, 2} |
+| `mask` | MK0_MLU | (1, 224, 224) float32, values 0–2 per the dataset card; 3 also observed (see §4) |
 | `valid_mask` | MK0_MNA | (1, 224, 224) float32, {0, 1} |
 | `info.json` | info.json | event `actid`, `aoiid`, acquisition dates/IDs per MS1/SL1/SL2, `pflood`, `pwater`, `geom` |
 
@@ -67,11 +69,16 @@ About 1.8 MB per sample (9 arrays × 200 KB + JSON).
 | 0 | no water |
 | 1 | permanent water |
 | 2 | flood |
-| 3 | ignore index in the official loss/metrics, **never assigned by the loader** |
+| 3 | not a class; official loss/metrics use `ignore_index=3` |
 
-Invalid pixels (`valid_mask = 0`) are **not** remapped to 3 by the official code. If we want to
-ignore them, we set `mask[valid_mask == 0] = 3` ourselves. That is a deliberate deviation, to be
-recorded when training.
+Verified in the 57-sample training subset (`docs/TRAINING_SMOKE_TEST.md`):
+
+- Value 3 **occurs in the data**, although the dataset card lists only 0–2 (87,173 pixels).
+- All invalid pixels observed (`valid_mask = 0`, σ⁰ = 0) had label 3 (35,126 of 35,126).
+- A further 52,047 **valid** pixels also had label 3. **Why is not established**; neither the
+  official code nor the dataset card explains it.
+- The official loader does not remap labels. Its loss uses `ignore_index=3`, so all label-3 pixels
+  are excluded from the loss. VantageQ uses labels as stored, matching the official code.
 
 ## 5. Loader flow → model input
 
@@ -81,8 +88,8 @@ recorded when training.
 4. Concatenate **`[post VV, post VH, pre1 VV, pre1 VH, pre2 VV, pre2 VH]`** → (6, 224, 224)
    (`segmentation_trainer.py`: `cat(image, pre_event)`, then `cat(…, pre_event_2)`).
 
-`scripts/kurosiwo_sample_smoke.py::build_model_input` is a numpy port of this, checked by
-`tests/test_kurosiwo_sample.py`. Clamped pixels map to 1.281 (VV) and 5.749 (VH), as observed.
+`ml/preprocessing.py::build_model_input` is the single numpy port of this (used by the dataset,
+the inspection script and future Trishuli inference), checked by `tests/test_kurosiwo_sample.py`. Clamped pixels map to 1.281 (VV) and 5.749 (VH), as observed.
 
 ## 6. Minimal subset and results
 
@@ -98,9 +105,10 @@ recorded when training.
 | 000001 | 28,306 (56.41 %) | 0 | 21,870 (43.59 %) |
 | 000002 | 27,982 (55.77 %) | 0 | 22,194 (44.23 %) |
 
-No permanent-water pixels in these three. Class 1 is not yet verified on real data.
+No permanent-water pixels in these three. Class 1 was later observed in the multi-event training
+subset (129,644 pixels; `docs/TRAINING_SMOKE_TEST.md`).
 
-**For a training smoke run** (next step), stream a few hundred to ~2,000 samples (≈ 0.5–4 GB).
+**For real training**, stream a few hundred to ~2,000 samples (≈ 0.5–4 GB) across events.
 Shards appear ordered by event (first GeoTIFF tar was all event 1111009; first webdataset samples
 all event 470), so the first samples of one shard cover only one or two events. Sampling across
 the 5 train shards and the val events is needed before any meaningful metric.

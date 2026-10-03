@@ -66,10 +66,11 @@ Per sample (`Dataset.__getitem__` → `concat` → `scale_img`):
 
 Other details:
 
-- **Labels:** 0 no water, 1 permanent water, 2 flood. Loss is `CrossEntropyLoss(ignore_index=3)`,
-  but the loader never sets 3. `valid_mask` is only passed to the scaler (unused in `normalize`
-  mode), so **invalid pixels are not excluded from the loss**. They keep their stored value
-  (no-data = 0.0 per `info.json`), or 0.15 if NaN.
+- **Labels:** classes 0 no water, 1 permanent water, 2 flood. Loss is
+  `CrossEntropyLoss(ignore_index=3)`; the loader never assigns 3 itself. In our 57-sample subset,
+  value 3 does occur in the data: all observed invalid pixels had label 3, and some valid pixels
+  too, for reasons not established (`docs/KUROSIWO_DATASET.md` §4). All label-3 pixels are excluded
+  from the loss; the SAR values of invalid pixels (no-data = 0.0) still enter the input.
 - Augmentations off by default (`data_augmentations=false`).
 - Whether the published mean/std were computed before or after clamping is not documented.
 
