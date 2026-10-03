@@ -289,11 +289,20 @@ ODbL 1.0. Attribution: "© OpenStreetMap contributors". Derived databases must a
 | Source | Licence | Required attribution |
 |--------|---------|----------------------|
 | Sentinel-1 / Sentinel-2 | Copernicus free & open data | "Contains modified Copernicus Sentinel data 2026, processed by the VantageQ team" |
-| Copernicus DEM GLO-30 | Copernicus DEM licence (free) | "Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved" **[VERIFY wording]** |
+| Copernicus DEM GLO-30 | Copernicus DEM GLO-30 licence (ESA), Article 6(b) | "produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved"; dataset citation: https://doi.org/10.5270/ESA-c5d3d65 |
 | Kuro Siwo dataset | CC BY 4.0 | Cite Bountos et al., NeurIPS 2024 |
 | Kuro Siwo code | MIT | Keep copyright notice if code is reused |
 | OpenStreetMap / ohsome | ODbL 1.0 | "© OpenStreetMap contributors" |
 | Sen1Floods11 (optional) | **[VERIFY]** | Cite Bonafilia et al., CVPR-W 2020 |
+
+Copernicus DEM notice verified on 2026-10-04 against the Copernicus DEM GLO-30 licence (ESA),
+Article 6, as linked from the CDSE/Sentinel Hub DEM documentation, and the CDSE Copernicus DEM
+collection page (https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM).
+Article 6(a) ("© DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under
+COPERNICUS by the European Union and ESA; all rights reserved") applies when distributing the DEM
+itself. VantageQ does not distribute the DEM: COPERNICUS_30 is used inside Sentinel Hub to
+orthorectify Sentinel-1, and results produced with it are shown. The Article 6(b) "produced using"
+notice for adapted/modified data is therefore used.
 
 ---
 
@@ -315,4 +324,4 @@ used only by `evaluation/` after a production run.
 5. **Himalayan validation data:** none in Kuro Siwo. Options: accept and report it, or hand-label
    a few small tiles from our own permitted imagery (not from EMS maps).
 6. **Bridge coverage:** 202 tagged road bridges; completeness unknown.
-7. **Copernicus DEM attribution wording** and **Sen1Floods11 licence** (only if used).
+7. **Sen1Floods11 licence** (only if used). (Copernicus DEM attribution wording: resolved 2026-10-04, see §7.)

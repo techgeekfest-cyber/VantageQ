@@ -97,7 +97,10 @@ for operational decisions without validation by qualified responders.
 
 Contains modified Copernicus Sentinel data (processed by the VantageQ team).
 Map data © OpenStreetMap contributors, available under the ODbL.
-Dataset and DEM attributions will be added as each source is integrated (see `docs/`).
+Copernicus DEM (used to orthorectify Sentinel-1): produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014
+and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA;
+all rights reserved. Kuro Siwo dataset (CC BY 4.0): Bountos et al., NeurIPS 2024. Full list and
+licences: `docs/DATA_SOURCES.md` §7.
 
 ## AI-assisted development disclosure
 
