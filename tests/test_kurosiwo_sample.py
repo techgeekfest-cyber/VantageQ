@@ -161,3 +161,28 @@ def test_absent_class_gives_nan_not_zero():
 
     m = summarize(*confusion(np.array([0, 0]), np.array([0, 0])))
     assert np.isnan(m["flood"]["iou"]) and np.isnan(m["flood"]["recall"])
+
+
+def test_class_without_ground_truth_is_not_applicable_but_false_alarms_are_kept():
+    from ml.metrics import confusion, summarize
+
+    m = summarize(*confusion(np.array([0, 2, 2]), np.array([0, 0, 0])))  # flood predicted, none in GT
+    f = m["flood"]
+    assert np.isnan(f["iou"]) and np.isnan(f["f1"]) and np.isnan(f["recall"])
+    assert f["precision"] == 0.0 and f["fp"] == 2
+    assert m["confusion_matrix"] == [[1, 0, 2], [0, 0, 0], [0, 0, 0]]
+
+
+def test_describe_counts_events_labels_and_grids(tmp_path):
+    pytest.importorskip("torch")
+    from ml.dataset import KuroSiwoDataset
+    from ml.eval_utils import describe
+
+    write_synthetic_sample(tmp_path / "a", actid=277)
+    write_synthetic_sample(tmp_path / "b", actid=321)
+    for name, grid in (("a", "g1"), ("b", "g2")):
+        info = json.loads((tmp_path / name / "info.json").read_text()) | {"grid_id": grid}
+        (tmp_path / name / "info.json").write_text(json.dumps(info))
+    events, labels, grids = describe(KuroSiwoDataset(tmp_path))
+    assert dict(events) == {277: 1, 321: 1} and grids == {"g1", "g2"}
+    assert set(labels) == {0, 1, 2, 3}

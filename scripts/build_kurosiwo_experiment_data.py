@@ -1,18 +1,20 @@
-"""Build the event-separated Kuro Siwo train/validation subset for the first real experiment.
+"""Build the event-separated Kuro Siwo train/validation/test subsets for VantageQ experiments.
 
 Uses shard probes (event ID at regular byte offsets of every labelled HF shard; see
 ml/kurosiwo.py::probe_shard) to stream a few samples per selected event, from up to
 --starts-per-event separate positions inside the event for spatial diversity.
 
-Train events come only from the official TRAIN split, validation events only from the official
-VAL split; the script refuses anything else. Samples are de-duplicated by grid_id, because the
+Train, validation and test events come only from the official TRAIN / VAL / TEST splits
+respectively; the script refuses anything else. Samples are de-duplicated by grid_id, because the
 HF train_GRD/test_GRD folders overlap in events.
 
-Output (git-ignored): data/external/kurosiwo_experiment/{train,val}/<actid>_<grid_id>/ + manifest.json
+Output (git-ignored): data/external/kurosiwo_experiment/{train,val,test}/<actid>_<grid_id>/
++ manifest_<splits>.json
 
 Usage:
   python scripts/build_kurosiwo_experiment_data.py --dry-run
-  python scripts/build_kurosiwo_experiment_data.py
+  python scripts/build_kurosiwo_experiment_data.py                  # train + val
+  python scripts/build_kurosiwo_experiment_data.py --splits test    # held-out test subset
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ OUT_DIR = REPO_ROOT / "data" / "external" / "kurosiwo_experiment"
 TRAIN_EVENTS = (118, 130, 147, 273, 275, 324, 427, 470, 502, 555, 1111004, 1111005, 1111009, 1111011)
 # All official validation events located by probing (514, 520, 559 were not found at 0.5 GB spacing).
 VAL_EVENTS = (279, 437, 1111003, 1111008)
+# Official test events located by probing (205, 411, 561, 1111002 were not found at 0.5 GB spacing).
+TEST_EVENTS = (277, 321, 445, 562, 1111007, 1111013)
+EVENTS = {"train": TRAIN_EVENTS, "val": VAL_EVENTS, "test": TEST_EVENTS}
 
 
 def load_or_probe(step_gb: float) -> list[dict]:
@@ -66,13 +71,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--train-per-event", type=int, default=18)
     ap.add_argument("--val-per-event", type=int, default=20)
+    ap.add_argument("--test-per-event", type=int, default=15)
+    ap.add_argument("--splits", default="train,val", help="comma-separated: train,val,test")
     ap.add_argument("--starts-per-event", type=int, default=2)
     ap.add_argument("--step-gb", type=float, default=0.5, help="probe spacing (only if no cached probes)")
     ap.add_argument("--max-mb", type=float, default=900, help="hard cap on total streamed MB")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    for split, events in (("train", TRAIN_EVENTS), ("val", VAL_EVENTS)):
+    splits = [x.strip() for x in args.splits.split(",")]
+    if not set(splits) <= set(EVENTS):
+        print(f"unknown split in {splits}")
+        return 1
+    for split, events in EVENTS.items():
         wrong = [a for a in events if split_of(a) != split]
         if wrong:
             print(f"refusing: events {wrong} are not in the official {split} split")
@@ -80,8 +91,9 @@ def main() -> int:
 
     probes = load_or_probe(args.step_gb)
     plan = []
-    for split, events, per_event in (("train", TRAIN_EVENTS, args.train_per_event),
-                                     ("val", VAL_EVENTS, args.val_per_event)):
+    per_event_n = {"train": args.train_per_event, "val": args.val_per_event, "test": args.test_per_event}
+    for split in splits:
+        events, per_event = EVENTS[split], per_event_n[split]
         for actid in events:
             starts = starts_for(probes, actid, args.starts_per_event)
             if not starts:
@@ -90,7 +102,7 @@ def main() -> int:
             per_start = -(-per_event // len(starts))  # ceil
             plan += [(split, actid, s, per_start) for s in starts]
     est = sum(n for *_, n in plan) * SAMPLE_BYTES / 1e6
-    for split in ("train", "val"):
+    for split in splits:
         ev = sorted({a for s, a, *_ in plan if s == split})
         n = sum(k for s, _, _, k in plan if s == split)
         print(f"{split}: {len(ev)} events {ev}, up to {n} samples")
@@ -123,8 +135,9 @@ def main() -> int:
             kept += 1
         print(f"  {split} {actid} @ {start['shard']}:{start['offset']}: kept {kept}, {nbytes / 1e6:.1f} MB")
     shutil.rmtree(OUT_DIR / "_incoming", ignore_errors=True)
-    (OUT_DIR / "manifest.json").write_text(json.dumps(manifest, indent=1))
-    for split in ("train", "val"):
+    name = "manifest.json" if splits == ["train", "val"] else f"manifest_{'_'.join(splits)}.json"
+    (OUT_DIR / name).write_text(json.dumps(manifest, indent=1))
+    for split in splits:
         rows = [m for m in manifest if m["split"] == split]
         print(f"{split}: {len(rows)} samples from {len({m['actid'] for m in rows})} events")
     print(f"streamed {total / 1e6:.1f} MB")

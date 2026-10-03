@@ -104,11 +104,12 @@ cross-entropy over non-ignored pixels.
 
 Pixel accuracy 0.967 (not meaningful; dominated by no-water).
 
-**Flood by validation event:**
+**Flood by validation event** (IoU/F1/recall are n/a when an event has no flood ground truth; this
+convention was made explicit in `ml/metrics.py` after this run, and changes no overall number):
 
 | Event | Flood IoU | F1 | Precision | Recall | TP / FP / FN |
 |---|---:|---:|---:|---:|---|
-| 279 Spain | 0 | 0 | 0 | n/a (no flood GT) | 0 / 27,376 / 0 |
+| 279 Spain | n/a (no flood GT) | n/a | 0 | n/a | 0 / 27,376 / 0 |
 | 437 France | 0.667 | 0.800 | 0.917 | 0.710 | 3,275 / 295 / 1,339 |
 | 1111003 Djibouti | 0.008 | 0.017 | 0.011 | 0.032 | 18 / 1,558 / 542 |
 | 1111008 Nicaragua | 0.722 | 0.839 | 0.882 | 0.799 | 70,972 / 9,535 / 17,799 |

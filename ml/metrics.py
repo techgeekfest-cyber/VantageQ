@@ -2,6 +2,10 @@
 
 Rows = ground truth, columns = prediction, over classes 0..NUM_CLASSES-1. Pixels whose label is
 IGNORE_INDEX are not counted anywhere (they are reported separately as `ignored_pixels`).
+
+If a class has no ground-truth pixels, IoU, F1 and recall are NaN (not applicable), not 0.
+Precision is still reported (0 when that class was predicted anyway) and the false-positive
+count `fp` is kept, so false alarms remain visible.
 """
 
 from __future__ import annotations
@@ -27,7 +31,10 @@ def confusion(pred: np.ndarray, target: np.ndarray, num_classes: int = NUM_CLASS
 def _scores(tp: float, fp: float, fn: float) -> dict:
     def div(a, b):
         return float(a / b) if b else float("nan")
-    return {"iou": div(tp, tp + fp + fn), "f1": div(2 * tp, 2 * tp + fp + fn),
+    has_gt = (tp + fn) > 0
+    nan = float("nan")
+    return {"iou": div(tp, tp + fp + fn) if has_gt else nan,
+            "f1": div(2 * tp, 2 * tp + fp + fn) if has_gt else nan,
             "precision": div(tp, tp + fp), "recall": div(tp, tp + fn),
             "tp": int(tp), "fp": int(fp), "fn": int(fn)}
 
@@ -43,14 +50,19 @@ def summarize(cm: np.ndarray, ignored: int = 0) -> dict:
     water = _scores(tp_w, cm[:, w].sum() - tp_w, cm[w, :].sum() - tp_w)
     ious = [m["iou"] for m in per_class.values()]
     f1s = [m["f1"] for m in per_class.values()]
+    precisions = [m["precision"] for m in per_class.values()]
+    recalls = [m["recall"] for m in per_class.values()]
     total = int(cm.sum())
     return {
         "valid_pixels": total,
         "ignored_pixels": int(ignored),
         "class_pixels": {LABELS.get(c, str(c)): int(cm[c, :].sum()) for c in range(cm.shape[0])},
+        "confusion_matrix": cm.astype(int).tolist(),  # rows = ground truth, cols = prediction
         "pixel_accuracy": float(np.trace(cm) / total) if total else float("nan"),
         "mean_iou": float(np.nanmean(ious)),
         "mean_f1": float(np.nanmean(f1s)),
+        "mean_precision": float(np.nanmean(precisions)),
+        "mean_recall": float(np.nanmean(recalls)),
         "per_class": per_class,
         "flood": per_class[LABELS[FLOOD]],
         "water_binary": water,
