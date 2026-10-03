@@ -244,7 +244,13 @@ Assessment:
 
 ## 6. OpenStreetMap (pre-event)
 
-### 6.1 ohsome API (recommended for the historical snapshot)
+### 6.1 ohsome API (originally recommended for the historical snapshot)
+
+> **Update 2026-10-04:** ohsome v1 extraction endpoints (`/elements/geometry`, `/elements/centroid`)
+> now return HTTP 403. The v2 API (`https://api.heigit.org/ohsome-api/v2/`, extraction at
+> `POST /extraction/features`, GeoParquet output) requires a free API key. Anonymous
+> `/v1/elements/count` still works. The impact analysis therefore uses an **Overpass attic query**
+> (§6.2) at 2026-08-25T00:00:00Z; see `docs/TRISHULI_IMPACT_ANALYSIS.md`.
 
 - `https://api.ohsome.org/v1/` returns OSM elements as they existed at a given `time`.
 - The current database ends at **2026-07-27T09:00Z**. That is **before** the event, so any ohsome

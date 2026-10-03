@@ -5,3 +5,5 @@ matplotlib
 pytest
 torch
 segmentation-models-pytorch
+shapely
+networkx
