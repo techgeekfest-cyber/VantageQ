@@ -1,0 +1,5 @@
+# Minimal dependencies for current scripts and tests. Add libraries only when a module needs them.
+numpy
+rasterio
+matplotlib
+pytest
