@@ -3,8 +3,10 @@
 Satellite flood-impact intelligence prototype for the **IIT Mandi Multimodal AI Hackathon 2026,
 Track B — Mapping Flood Damage from Space**.
 
-> **Status:** repository skeleton and architecture only. No pipeline, model or dashboard is
-> implemented yet. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> **Status:** working research prototype. Sentinel-1 retrieval, a frozen flood-segmentation model,
+> Trishuli inference, pre-event OSM impact and connectivity analysis, and a static map dashboard are
+> implemented. The situation report and EMSR927 evaluation are not built yet. See
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## What it will do
 
@@ -29,7 +31,7 @@ post-event OSM edits are **never** production inputs. EMSR927 is used only in th
 ## Repository layout
 
 ```
-backend/      Python + FastAPI production pipeline and API
+backend/      Python analysis pipeline (Sentinel-1 retrieval, impact, connectivity)
 ml/           Flood segmentation: datasets, model, training, model evaluation
 evaluation/   Evaluation-only comparison against EMSR927 (isolated)
 frontend/     Next.js + TypeScript + MapLibre dashboard
@@ -39,9 +41,43 @@ docs/         Architecture and project documentation
 tests/        Tests, including data-boundary guard tests
 ```
 
-## Getting started
+## Current Demo
 
-Not yet runnable. Setup instructions will be added as modules are implemented.
+**Trishuli Valley, Nepal: flood event of 26 August 2026** (one ~4.9 × 4.4 km sub-AOI near Betrawati).
+
+- **Predicted flood:** a frozen U-Net trained on the Kuro Siwo dataset, applied to Sentinel-1 VV/VH
+  (post-event 2026-08-28, pre-event 2026-08-16 and 2026-08-04, same track). Predicted flood extent:
+  0.120 km². The prediction is **not validated** against ground truth for Trishuli; on held-out
+  Kuro Siwo test events the model reached flood IoU 0.31 (`docs/TEST_EVALUATION.md`).
+- **Infrastructure:** historical OpenStreetMap snapshot from 2026-08-25 (pre-event). 3 road ways
+  potentially affected (189 m of road inside the predicted flood), 2 bridges intersecting the
+  predicted flood, 36 buildings potentially affected.
+- **Connectivity:** in a simplified road graph, 2 of 3 mapped settlements (Betrawati, Bhainse) are
+  **potentially cut off**, i.e. disconnected after removing flood-affected road edges. This is a graph
+  indicator, not confirmed real-world isolation; footpaths and roads outside the AOI are not in the graph.
+
+Details: `docs/TRISHULI_INFERENCE.md`, `docs/TRISHULI_IMPACT_ANALYSIS.md`.
+
+## Running the Dashboard
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open <http://localhost:3000>.
+
+- The dashboard is a static Next.js + MapLibre app with no backend or database. Its analytical
+  layers and every number it shows come from a **small committed Trishuli demo snapshot**
+  (`frontend/public/demo/trishuli/`, ~100 KB), built from the pipeline outputs by
+  `scripts/build_demo_snapshot.py`.
+- Large raw datasets (Sentinel-1 rasters, Kuro Siwo samples, raw OSM responses), model checkpoints
+  and full analysis outputs remain **git-ignored** and are not needed to run the dashboard.
+- The basemap uses **live OpenStreetMap tiles** for orientation only (internet required). They show
+  current OSM, whereas the analysis uses the 2026-08-25 historical snapshot.
+
+More: `frontend/README.md`.
 
 ## Limitations (summary)
 
