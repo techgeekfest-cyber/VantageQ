@@ -1,0 +1,60 @@
+# --- Data (never commit imagery, rasters, or downloaded datasets) ---
+data/*
+!data/README.md
+!data/*/
+data/*/*
+!data/*/.gitkeep
+
+# Geospatial / model artifacts
+*.tif
+*.tiff
+*.jp2
+*.SAFE/
+*.zip
+*.nc
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.gpkg
+*.pbf
+*.osm
+*.pt
+*.pth
+*.ckpt
+*.onnx
+ml/checkpoints/
+ml/runs/
+outputs/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Node / Next.js ---
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- OS / editors ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
